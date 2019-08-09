@@ -1,0 +1,7 @@
+publish
+target
+project/target
+generated-src
+output
+.sconsign.dblite
+.ivy2

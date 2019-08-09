@@ -1,0 +1,15 @@
+[submodule "firrtl"]
+	path = firrtl
+	url = https://github.com/freechipsproject/firrtl.git
+[submodule "designs/rocket-chip"]
+	path = designs/rocket-chip
+	url = https://github.com/chipsalliance/rocket-chip.git
+[submodule "designs/hwacha"]
+	path = designs/hwacha
+	url = https://github.com/ucb-bar/hwacha.git
+[submodule "designs/sifiveip"]
+	path = designs/sifiveip
+	url = https://github.com/sifive/sifive-blocks.git
+[submodule "designs/testchipip"]
+	path = designs/testchipip
+	url = https://github.com/ucb-bar/testchipip.git
