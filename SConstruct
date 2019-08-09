@@ -52,7 +52,7 @@ def compile_verilog(env):
 
 def run_emul(env):
     out_dir = env['OUT_DIR']
-    makefrag = os.path.join(env['GEN_DIR'], 'simmani.rocketchip.d')
+    makefrag = os.path.join(env['GEN_DIR'], 'dessert.rocketchip.d')
     env.Depends(makefrag, 'fpga-v')
     name = '%s%s' % (
         'V' if env['EMUL'] == 'verilator' else '', env['DESIGN'])
@@ -131,7 +131,14 @@ def _rocketchip_test_actions(target, source, env, for_signature):
         ])
     ]
 
+variables = Variables(None, ARGUMENTS)
+variables.AddVariables(
+    EnumVariable('PLATFORM', 'Host platform', 'f1', allowed_values=['zynq', 'f1']),
+    EnumVariable('EMUL', 'Program for emulation, RTL/gate-level simulation',
+                 'verilator', allowed_values=['vcs', 'verilator']))
+
 env = Environment(
+    variables=variables,
     ENV=os.environ,
     SBT='sbt',
     SBT_FLAGS=' '.join([
@@ -141,7 +148,6 @@ env = Environment(
         '-J-XX:MaxMetaspaceSize=512M',
         '++2.12.4'
     ]),
-    EMUL='verilator',
     VERILATOR='verilator --cc --exe',
     VCS='vcs -full64',
     PLATFORM='f1',
@@ -179,3 +185,12 @@ if GetOption('num_jobs') < 8:
 print("# of job: %d" % GetOption('num_jobs'))
 
 verilog, const_h, const_vh, defines = compile_verilog(env)
+
+fpga_dir = os.path.abspath(os.path.join('platforms', 'f1'))
+env.SConscript(
+    os.path.join('src', 'main', 'cc', 'SConscript'),
+    exports=[
+        'env', 'fpga_dir', 'verilog', 'const_h', 'const_vh'
+    ])
+
+run_emul(env)

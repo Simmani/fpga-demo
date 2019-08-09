@@ -1,0 +1,240 @@
+import os
+import logging
+from operator import add
+from functools import reduce
+
+def compile_library(env):
+    gen_dir = env['GEN_DIR']
+    dramsim_cpp = Glob(os.path.join('sim', 'dramsim2', '*.cpp'))
+    dramsim_o = [os.path.join(gen_dir, os.path.splitext(f.name)[0] + '.o') for f in dramsim_cpp]
+    for source, target in zip(dramsim_cpp, dramsim_o):
+        env.Precious(env.Object(target, source, CXXFLAGS=env['CXXFLAGS'] + [
+            '-DNO_STORAGE',
+            '-DNO_OUTPUT',
+            '-Dmain=nomain'
+        ]))
+
+    utils_cc = Glob(os.path.join('sim', 'utils', '*.cc'))
+    utils_o = [os.path.join(gen_dir, os.path.splitext(f.name)[0] + '.o') for f in utils_cc]
+    for source, target in zip(utils_cc, utils_o):
+        env.Precious(env.Object(target, source))
+
+    return env.Precious(StaticLibrary(
+        os.path.join(gen_dir, 'libmidas.a'),
+        dramsim_o + utils_o))
+
+######################
+### Verilator
+######################
+
+def _verilator_actions(target, source, env, for_signature):
+    return [
+        Delete(env['CSRC_DIR']),
+        ' '.join([
+            env['VERILATOR']
+        ] + env['VERILATOR_FLAGS'] + [
+            '--top-module', env['VERILATOR_TOP'],
+            '-CFLAGS', '\"-include %s\"' % (os.path.join(
+                env['CSRC_DIR'], 'V' + env['VERILATOR_TOP'] + '.h')),
+            '-CFLAGS', '\"%s\"' % (' '.join(env['CXXFLAGS'])),
+            '-LDFLAGS', '\"%s\"' % (' '.join(env['LDFLAGS'])),
+            '-Mdir', env['CSRC_DIR'],
+            '-o', target[0].abspath
+        ] + [
+            str(s.abspath) for s in source
+            if os.path.splitext(s.name)[1] not in ['.extra_v', '.path', '.vfrag']
+        ] + reduce(add, [
+            s.get_text_contents().splitlines() for s in source
+            if s.name.endswith('.extra_v') and os.path.exists(s.abspath)
+        ], [])),
+        ' '.join([
+            'make',
+            '-C', env['CSRC_DIR'],
+            '-f', 'V%s.mk' % env['VERILATOR_TOP']
+        ])
+    ]
+
+def compile_verilator(env, gen_dir, out_dir, srcs, binary, cmd):
+    csrc_dir = os.path.join(gen_dir, binary + '.csrc')
+    binary_path = os.path.join(out_dir, binary)
+    env.Verilator(binary_path, srcs, CSRC_DIR=csrc_dir)
+    env.Alias(cmd, binary_path)
+    env.Clean(cmd, csrc_dir)
+    return binary_path
+
+######################
+### VCS
+######################
+
+def _vcs_actions(target, source, env, for_signature):
+    return [
+        Delete(env['CSRC_DIR']),
+        Delete(env['DAIDIR_DIR']),
+        ' '.join([
+            env['VCS']
+        ] + env['VCS_FLAGS'] + [
+            '-cpp', env['CXX'],
+            '-CFLAGS', '\"%s\"' % (' '.join(env['CXXFLAGS'])),
+            '-LDFLAGS', '\"%s\"' % (' '.join(env['LDFLAGS'])),
+            '-Mdir=' + env['CSRC_DIR'],
+            '-o', target[0].abspath,
+        ] + [
+            str(s.abspath) for s in source
+            if os.path.splitext(s.name)[1] not in ['.extra_v', '.path', '.vfrag']
+        ] + reduce(add, [
+            s.get_text_contents().splitlines() for s in source
+            if s.name.endswith('.extra_v') and os.path.exists(s.abspath)
+        ], [])),
+    ]
+
+def compile_vcs(env, gen_dir, out_dir, srcs, binary, cmd):
+    csrc_dir = os.path.join(gen_dir, binary + '.csrc')
+    daidir_dir = os.path.join(out_dir, binary + '.daidir')
+    binary_path = os.path.join(out_dir, binary)
+    env.VCS(binary_path, srcs, CSRC_DIR=csrc_dir, DAIDIR_DIR=daidir_dir)
+    env.Alias(cmd, binary_path)
+    env.Clean(cmd, [csrc_dir, daidir_dir])
+    return binary_path
+
+
+def compile_emul(env, verilog_dir, driver_dir, other_cc, lib):
+    Import('verilog', 'const_h', 'const_vh')
+    platform = env['PLATFORM']
+    emul_cc = [
+        File(os.path.join(driver_dir, 'rocketchip-emul.cc')),
+        File(os.path.join('sim', 'simif.cc')),
+        File(os.path.join('sim', 'simif_emul.cc')),
+        File(os.path.join('sim', 'emul', 'mmio_%s.cc' % platform)),
+    ]
+
+    emul_v = os.path.join(verilog_dir, 'emul_%s.v' % platform)
+
+    env.AppendUnique(
+        CXXFLAGS=['-include', const_h],
+        LDFLAGS=['-lmidas'],
+        VCS_FLAGS=[
+            '-e', 'vcs_main',
+            '+define+STOP_COND=!emul.reset',
+            '+define+PRINTF_COND=!emul.reset'
+        ])
+    env['VERILATOR_TOP'] = 'F1Shim'
+
+    def _compile(env, suffix=''):
+        compile_verilator(
+            env,
+            env['GEN_DIR'],
+            env['OUT_DIR'],
+            [verilog] + emul_cc + other_cc + [lib],
+            'V' + env['DESIGN'] + suffix,
+            'verilator' + suffix)
+        compile_vcs(
+            env,
+            env['GEN_DIR'],
+            env['OUT_DIR'],
+            [verilog, const_vh, emul_v] + emul_cc + other_cc + [lib],
+            env['DESIGN'] + suffix,
+            'vcs' + suffix)
+
+    _compile(env)
+    _compile(env.Clone(
+        VERILATOR_FLAGS=env['VERILATOR_FLAGS'] + ['--trace'],
+        VCS_FLAGS=env['VCS_FLAGS'] + ['+define+DEBUG'],
+    ), '-debug')
+
+def compile_driver(env, fpga_dir, driver_dir, other_cc, lib):
+    Import('const_h')
+    platform = env['PLATFORM']
+    driver_cc = [
+        File(os.path.join(driver_dir, 'rocketchip-%s.cc' % platform)),
+        File(os.path.join('sim', 'simif.cc')),
+        File(os.path.join('sim', 'simif_%s.cc' % platform))
+    ]
+    env.AppendUnique(CXXFLAGS=['-include', const_h])
+    env.AppendUnique(
+        CXXFLAGS=['-I%s' % os.path.join(fpga_dir, 'sdk', 'userspace', 'include')],
+        LDFLAGS=['-lmidas', '-lfpga_mgmt', '-lrt'])
+    srcs = driver_cc + other_cc + lib
+
+    driver = env.Program(
+        os.path.join(env['OUT_DIR'], '%s-%s' % (env['DESIGN'], platform)),
+        srcs + lib, LINKFLAGS=env['LDFLAGS'])
+    env.Alias(platform, driver)
+    Export('driver')
+
+
+def main():
+    Import('env', 'fpga_dir')
+    verilog_dir = os.path.join('..', 'verilog')
+    driver_dir = os.path.abspath('rocketchip')
+
+    env.Append(
+        BUILDERS={
+            'Verilator': Builder(generator=_verilator_actions),
+            'VCS'      : Builder(generator=_vcs_actions)
+        })
+
+    env.AppendUnique(
+        CXXFLAGS=[
+            '-O2',
+            '-std=c++11',
+            '-Wall',
+            '-Wno-unused-variable',
+            '-I' + os.path.abspath(driver_dir),
+            '-I' + os.path.abspath('sim'),
+            '-I' + os.path.abspath(os.path.join('sim', 'utils')),
+            '-I' + os.path.abspath(os.path.join('sim', 'dramsim2')),
+        ],
+        LDFLAGS=[
+            '-L' + env['GEN_DIR'],
+            '-lstdc++',
+            '-lpthread',
+            '-lgmp',
+        ],
+        VERILATOR_FLAGS=[
+            '--assert',
+            '--Wno-STMTDLY',
+            '--Wno-CMPCONST',
+            '-O3',
+        ],
+        VCS_FLAGS=[
+            '-quiet', '-debug_pp', '-timescale=1ns/1ps', '-notice', '-line',
+            '+rad', '+vc+list', '+vcs+initreg+random', '+vcs+lic+wait', '+no_notifier',
+            '+lint=all,noVCDE,noONGS,noUI,noIWU,noOUDPE,noVNGS,noNS',
+            '+define+CLOCK_PERIOD=${CLOCK_PERIOD}',
+            '+define+RANDOMIZE_MEM_INIT',
+            '+define+RANDOMIZE_REG_INIT',
+            '+define+RANDOMIZE_GARBAGE_ASSIGN',
+            '+define+RANDOMIZE_INVALID_ASSIGN',
+            '-CFLAGS', '\"-DVCS %s"' % ("-I%s/include" % env['ENV']['VCS_HOME']
+                                        if 'VCS_HOME' in env['ENV'] else "")
+        ])
+
+    env.AppendUnique(
+        CXXFLAGS=['-I%s/include' % env['RISCV']],
+        LDFLAGS=[
+            '-lfesvr',
+            '-L%s/lib' % env['RISCV'],
+            '-Wl,-rpath,%s/lib' % env['RISCV']
+        ])
+
+    lib = compile_library(env)
+
+    dramsim2_ini = os.path.join(env['OUT_DIR'], 'dramsim2_ini')
+    if not os.path.exists(dramsim2_ini):
+        Execute(Copy(
+            dramsim2_ini,
+            os.path.join('..', 'resources', 'dramsim2_ini')))
+
+    other_cc = \
+        Glob(os.path.join('sim', 'sample', '*.cc')) + \
+        Glob(os.path.join('sim', 'endpoints', '*.cc')) + [
+            File(os.path.join(driver_dir, 'rocketchip.cc'))
+        ] + \
+        Glob(os.path.join(driver_dir, 'fesvr', '*.cc')) + \
+        Glob(os.path.join(driver_dir, 'endpoints', '*.cc'))
+
+    compile_emul(env.Clone(), verilog_dir, driver_dir, other_cc, lib)
+    compile_driver(env.Clone(), fpga_dir, driver_dir, other_cc, lib)
+
+if __name__ == 'SCons.Script':
+    main()

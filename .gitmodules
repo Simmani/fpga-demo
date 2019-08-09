@@ -13,3 +13,6 @@
 [submodule "designs/testchipip"]
 	path = designs/testchipip
 	url = https://github.com/ucb-bar/testchipip.git
+[submodule "src/main/cc/sim/dramsim2"]
+	path = src/main/cc/sim/dramsim2
+	url = https://github.com/firesim/DRAMSim2
