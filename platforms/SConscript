@@ -1,0 +1,124 @@
+import os
+import datetime
+import logging
+from operator import add
+from functools import reduce
+from SCons.Action import ActionFactory
+
+def _sed(target, source, args):
+    with open(str(target), 'w') as _t, open(str(source), 'r') as _s:
+        for line in _s:
+            _t.write(reduce(lambda l, x: l.replace(x[0], x[1]), args, line))
+
+Sed = ActionFactory(
+    _sed,
+    lambda target, source, args:
+    'Sed(%s)' % (reduce(
+        lambda l, x: '%s, "%s -> %s"' % (l, x[0], x[1]),
+        args, '"%s", "%s"' % (target, source))))
+
+def _remove_ila(target, source):
+    with open(str(target), 'w') as _t, open(str(source), 'r') as _s:
+        for line in _s:
+            if 'firesim_ila' not in line and 'ila_files' not in line:
+                _t.write(line)
+
+RemoveILA = ActionFactory(
+    _remove_ila,
+    lambda target, source:
+    'RemoveILA("%s", "%s")' % (target, source))
+
+def _cl_firesim_srcs(target, source, env):
+    return target, source + reduce(add, [
+        [os.path.join(dirpath, f) for f in filenames]
+        for dirpath, _, filenames in os.walk(
+            os.path.join(env['BOARD_DIR'], 'cl_firesim'))
+    ])
+
+def _f1_actions(source, target, env, for_signature):
+    cl_dir = os.path.join(env['BOARD_DIR'], env['DESIGN'])
+    cl_firesim = os.path.join(env['BOARD_DIR'], 'cl_firesim')
+    build = os.path.join(cl_dir, 'build')
+    verilog = os.path.join(cl_dir, 'design', 'cl_firesim_generated.sv')
+    defines = os.path.join(cl_dir, 'design', 'cl_firesim_generated_defines.vh')
+    encrypt = os.path.join(os.path.abspath(
+        os.path.join('platforms', 'resources', 'encrypt.tcl')))
+    env['ENV']['CL_DIR'] = cl_dir
+    return ([
+        Move("%s-%s" % (cl_dir, datetime.datetime.now()), cl_dir)
+    ] if os.path.exists(cl_dir) else []) + [
+        Copy(cl_dir, cl_firesim)
+    ] + [
+        RemoveILA(
+            os.path.join(cl_dir, f),
+            os.path.join(cl_firesim, f))
+        for f in [
+            os.path.join('design', 'cl_firesim.sv'),
+            os.path.join('build', 'scripts', 'synth_cl_firesim.tcl'),
+            os.path.join('build', 'scripts', 'encrypt.tcl'),
+            os.path.join('verif', 'scripts', 'top.vivado.f')
+        ]
+    ] + [
+        Sed(verilog, source[0], [
+            ('$random', "64'b0"),
+            ('fatal', 'fatal(0, "")')
+        ]),
+        Copy(defines, source[1]),
+        "cd {build}/scripts && "
+        "./aws_build_dcp_from_cl.sh -notify".format(build=build)
+    ]
+
+def _afi_actions(source, target, env, for_signature):
+    cl_dir = os.path.join(env['BOARD_DIR'], env['DESIGN'])
+    to_aws = os.path.join(cl_dir, 'build', 'checkpoints', 'to_aws')
+    tarball = [
+        f for f in os.listdir(to_aws) if f.endswith('.tar')
+    ] if os.path.exists(to_aws) else []
+    if not tarball:
+        logging.error("No chckpoint is created")
+        return []
+    return [
+        ' '.join([
+            'aws', 's3', 'cp',
+            os.path.join(to_aws, tarball[0]),
+            's3://%s/dcp/' % ARGUMENTS['bucket']
+        ]),
+        ' '.join([
+            'aws', 'ec2', 'create-fpga-image',
+            '--name', ARGUMENTS.get('name', 'simmani-hwacha-fpga-demo'),
+            '--input-storage-location',
+            'Bucket=%s,Key=dcp/%s' % (ARGUMENTS['bucket'], tarball[0]),
+            '--logs-storage-location',
+            'Bucket=%s,Key=logs/' % (ARGUMENTS['bucket'])
+        ])
+    ]
+
+def _load_actions(source, target, env, for_signature):
+    # TODO: load dma
+    return [
+        ' '.join(['sudo', 'fpga-clear-local-image', '-S', '0']),
+        ' '.join(['sudo', 'fpga-load-local-image', '-S', '0', '-I', ARGUMENTS['agfi']])
+    ] if 'agfi' in ARGUMENTS else []
+
+def main():
+    Import('env', 'verilog', 'defines')
+
+    env.SetDefault(
+        BOARD_DIR=os.path.abspath(
+            os.path.join('f1', 'hdk', 'cl', 'developer_designs')))
+
+    env.Append(BUILDERS={
+        'FPGA': Builder(generator=_f1_actions, emitter=_cl_firesim_srcs),
+        'AFI': Builder(generator=_afi_actions),
+        'LOAD': Builder(generator=_load_actions)
+    })
+
+    if all([arg in ARGUMENTS for arg in ['bucket']]):
+        env.Default(env.Alias('create-afi', env.AFI('#create_afi', None)))
+    if all([arg in ARGUMENTS for arg in ['agfi']]):
+        env.Default(env.Alias('load-afi', env.LOAD('#load_afi', None)))
+
+    env.Alias('fpga', env.FPGA('#fpga', [verilog, defines]))
+
+if __name__ == 'SCons.Script':
+    main()

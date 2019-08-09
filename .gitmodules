@@ -16,3 +16,6 @@
 [submodule "src/main/cc/sim/dramsim2"]
 	path = src/main/cc/sim/dramsim2
 	url = https://github.com/firesim/DRAMSim2
+[submodule "platforms/f1"]
+	path = platforms/f1
+	url = https://github.com/firesim/aws-fpga-firesim.git

@@ -94,6 +94,7 @@ def _scala_srcs(target, source, env):
     extra_srcs = ['publish']
 
     submodules = [
+        os.path.curdir,
         os.path.join('designs', 'rocket-chip'),
         os.path.join('designs', 'testchipip'),
         os.path.join('designs', 'sifive-blocks'),
@@ -192,5 +193,8 @@ env.SConscript(
     exports=[
         'env', 'fpga_dir', 'verilog', 'const_h', 'const_vh'
     ])
+env.SConscript(
+    os.path.join('platforms', 'SConscript'),
+    exports=['env', 'verilog', 'defines'])
 
 run_emul(env)
