@@ -93,13 +93,6 @@ def _afi_actions(source, target, env, for_signature):
         ])
     ]
 
-def _load_actions(source, target, env, for_signature):
-    # TODO: load dma
-    return [
-        ' '.join(['sudo', 'fpga-clear-local-image', '-S', '0']),
-        ' '.join(['sudo', 'fpga-load-local-image', '-S', '0', '-I', ARGUMENTS['agfi']])
-    ] if 'agfi' in ARGUMENTS else []
-
 def main():
     Import('env', 'verilog', 'defines')
 
@@ -110,13 +103,10 @@ def main():
     env.Append(BUILDERS={
         'FPGA': Builder(generator=_f1_actions, emitter=_cl_firesim_srcs),
         'AFI': Builder(generator=_afi_actions),
-        'LOAD': Builder(generator=_load_actions)
     })
 
     if all([arg in ARGUMENTS for arg in ['bucket']]):
         env.Default(env.Alias('create-afi', env.AFI('#create_afi', None)))
-    if all([arg in ARGUMENTS for arg in ['agfi']]):
-        env.Default(env.Alias('load-afi', env.LOAD('#load_afi', None)))
 
     env.Alias('fpga', env.FPGA('#fpga', [verilog, defines]))
 

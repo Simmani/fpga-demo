@@ -77,6 +77,34 @@ def run_emul(env):
             SIM_ARGS=sim_args))
     env.SideEffect('#make', targets)
 
+def run_sim(env):
+    Import('driver')
+    if 'run' in ARGUMENTS:
+        run = [
+            os.path.abspath(x)
+            if os.path.isfile(os.path.abspath(x))
+            else x for x in ARGUMENTS['run'].split(' ')
+        ]
+        benchmark = '-'.join([os.path.basename(x) for x in run])
+        agfi = ARGUMENTS.get('agfi', 'agfi-033d1f2bff292a5b7')
+        env.Default(env.Alias('run', env.Command('#run', driver, [
+            ' '.join(['sudo', 'fpga-clear-local-image', '-S', '0']),
+            ' '.join(['sudo', 'fpga-load-local-image', '-S', '0', '-I', agfi]),
+            ' '.join([
+                'cd', '$SOURCE.dir', '&&',
+                'sudo', './$SOURCE.file'
+            ] + run + [
+                #'+sample=%s.sample' % benchmark,
+                '+power=%s-power.csv' % benchmark,
+                #'+toggle=%s-toggle.csv' % benchmark,
+                #'+sample-pwr=%s-sample.csv' % benchmark,
+                '+baudrate=100000',
+                "+model=%s" % os.path.abspath("model.tsmc45.csv")
+            ] + env['SIM_ARGS'] + [
+                '|&', 'tee', '%s.out' % benchmark
+            ])
+        ])))
+
 def _get_submodule_files(submodule):
     return reduce(add, [
         [
@@ -198,3 +226,4 @@ env.SConscript(
     exports=['env', 'verilog', 'defines'])
 
 run_emul(env)
+run_sim(env)
