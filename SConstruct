@@ -102,6 +102,11 @@ def run_sim(env):
                 "+model=%s" % os.path.abspath("model.tsmc45.csv")
             ] + env['SIM_ARGS'] + [
                 '|&', 'tee', '%s.out' % benchmark
+            ]),
+            ' '.join([
+                os.path.abspath('plot-power.py'),
+                '-d', os.path.join(env['OUT_DIR'], benchmark),
+                '-p', os.path.join(env['OUT_DIR'], benchmark + '-power.csv')
             ])
         ])))
 

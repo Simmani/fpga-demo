@@ -12,9 +12,13 @@ git config --global --unset submodule.SDAccel/examples/xilinx_2018.2.update
 sudo yum groupinstall -y "Development tools"
 sudo yum install -y gmp-devel mpfr-devel libmpc-devel zlib-devel
 sudo yum install -y java java-devel
-sudo yum install -y vim python2-pip
+sudo yum install -y vim python2-pip python2-devel
+sudo yum install -y https://centos7.iuscommunity.org/ius-release.rpm
+sudo yum install -y python36u python36u-pip python36u-devel
+sudo pip install --upgrade pip
 sudo pip install scons
-sudo yum install -y python34 python34-pip python34-devel
+sudo pip install numpy
+sudo pip install matplotlib
 curl https://bintray.com/sbt/rpm/rpm | sudo tee /etc/yum.repos.d/bintray-sbt-rpm.repo
 sudo yum install -y sbt
 
