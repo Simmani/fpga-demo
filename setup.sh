@@ -14,13 +14,18 @@ sudo yum install -y gmp-devel mpfr-devel libmpc-devel zlib-devel
 sudo yum install -y java java-devel
 sudo yum install -y vim python2-pip python2-devel
 sudo yum install -y https://centos7.iuscommunity.org/ius-release.rpm
+sudo yum install -y expat-devel libusb1-devel ncurses-devel cmake "perl(ExtUtils::MakeMaker)"
 sudo yum install -y python36u python36u-pip python36u-devel
+sudo rm /usr/bin/python3
+sudo ln -s /usr/bin/python3.6 /usr/bin/python3
 sudo pip install --upgrade pip
 sudo pip install scons
 sudo pip install numpy
-sudo pip install matplotlib
+sudo pip3.6 install numpy
+sudo pip3.6 install matplotlib
+sudo pip3.6 install scikit-learn
 curl https://bintray.com/sbt/rpm/rpm | sudo tee /etc/yum.repos.d/bintray-sbt-rpm.repo
-sudo yum install -y sbt
+sudo yum install -y sbt dtc
 
 DTCversion=dtc-1.4.4
 wget https://git.kernel.org/pub/scm/utils/dtc/dtc.git/snapshot/$DTCversion.tar.gz
